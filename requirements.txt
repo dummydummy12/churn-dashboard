@@ -1,0 +1,8 @@
+streamlit
+pandas
+boto3
+snowflake-connector-python
+plotly
+joblib
+scikit-learn
+pyarrow
