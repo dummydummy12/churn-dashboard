@@ -40,7 +40,7 @@ try:
     AWS_ACCESS_KEY = get_config("AWS_ACCESS_KEY_ID")
     AWS_SECRET_KEY = get_config("AWS_SECRET_ACCESS_KEY")
 except:
-    st.error("Configuration Error.")
+    st.error("Configuration Error. Check Secrets.")
     st.stop()
 
 # ==========================================
@@ -76,8 +76,7 @@ def get_snowflake_data():
         database=SNOWFLAKE_DB,
         schema=SNOWFLAKE_SCHEMA
     )
-    # UPDATED QUERY: Prioritize users with Real-Time activity so they appear in the dashboard
-    # Then take a sample of the rest to reach 2000 rows
+    # Order by interaction to prioritize Active Users
     query = """
     SELECT * FROM CUSTOMER_FEATURES_VIEW 
     ORDER BY RT_TOTAL_INTERACTIONS DESC, CUSTOMERID 
@@ -86,6 +85,22 @@ def get_snowflake_data():
     df = pd.read_sql(query, conn)
     conn.close()
     df.columns = [x.upper() for x in df.columns]
+    
+    # --- FIX FOR EDA: Recreate Text Labels from Numbers ---
+    if not df.empty:
+        # 1. Recreate 'CONTRACT' text
+        def get_contract(row):
+            if row.get('IS_MONTH_TO_MONTH') == 1: return 'Month-to-month'
+            if row.get('IS_TWO_YEAR') == 1: return 'Two year'
+            return 'One year'
+        df['CONTRACT_TEXT'] = df.apply(get_contract, axis=1)
+        
+        # 2. Recreate 'PAYMENT' text (Simplified)
+        df['PAYMENT_TEXT'] = df['PAYS_VIA_ECHECK'].apply(lambda x: 'Electronic Check' if x == 1 else 'Other')
+        
+        # 3. Recreate 'CHURN' text for legends
+        df['CHURN_TEXT'] = df['CHURN_LABEL'].apply(lambda x: 'Churned' if x == 1 else 'Active')
+
     return df.fillna(0)
 
 # ==========================================
@@ -93,7 +108,6 @@ def get_snowflake_data():
 # ==========================================
 st.title("⚡ Real-Time Churn Analytics Engine")
 
-# Top Bar: Status & Refresh
 col1, col2 = st.columns([1, 6])
 with col1:
     if st.button("🔄 Refresh Data"):
@@ -101,32 +115,32 @@ with col1:
 with col2:
     st.caption("Last updated: Just now | Connected to Snowflake & AWS S3")
 
-# Load Data
 resources = load_resources_from_s3()
 model = resources["model"]
 leaderboard = resources["leaderboard"]
 df = get_snowflake_data()
 
-# Generate Predictions if data exists
 if model is not None and not df.empty:
-    X = df.drop(columns=['CUSTOMERID', 'CHURN_LABEL'], errors='ignore')
+    # Drop non-feature columns for prediction
+    # Note: We must drop the NEW text columns we just created, or the model will crash
+    X = df.drop(columns=['CUSTOMERID', 'CHURN_LABEL', 'CONTRACT_TEXT', 'PAYMENT_TEXT', 'CHURN_TEXT'], errors='ignore')
+    
     try:
         df['PREDICTED_CHURN'] = model.predict(X)
         df['CHURN_PROBABILITY'] = model.predict_proba(X)[:, 1]
-    except:
-        st.error("Model prediction failed. Check feature columns.")
+    except Exception as e:
+        st.error(f"Prediction Error: {e}")
 
 # ==========================================
 # TABS LAYOUT
 # ==========================================
 tab1, tab2, tab3 = st.tabs(["📊 Data Explorer (EDA)", "🚨 Live Monitoring", "🧠 Model Performance"])
 
-# --- TAB 1: EXPLORATORY DATA ANALYSIS (EDA) ---
+# --- TAB 1: EDA (FIXED) ---
 with tab1:
     st.header("Exploratory Data Analysis")
     st.markdown("Understanding the underlying patterns in our Telco customer base.")
 
-    # Row 1: Dataset Overview
     c1, c2, c3 = st.columns(3)
     c1.metric("Total Rows Fetched", len(df))
     c2.metric("Features Available", len(df.columns))
@@ -139,44 +153,38 @@ with tab1:
     row2_1, row2_2 = st.columns(2)
     
     with row2_1:
-        # Contract Type Distribution
-        fig_contract = px.histogram(df, x="CONTRACT", color="CHURN_LABEL", barmode="group", 
-                                  title="Churn by Contract Type", color_discrete_sequence=["#10b981", "#ef4444"])
+        # FIXED: Use CONTRACT_TEXT and CHURN_TEXT
+        fig_contract = px.histogram(df, x="CONTRACT_TEXT", color="CHURN_TEXT", barmode="group", 
+                                  title="Churn by Contract Type", color_discrete_sequence=["#ef4444", "#10b981"])
         st.plotly_chart(fig_contract, use_container_width=True)
         st.caption("Insight: Month-to-month customers churn significantly more than Two-year contract holders.")
 
     with row2_2:
-        # Payment Method
-        fig_pay = px.pie(df, names="PAYMENTMETHOD", title="Payment Method Distribution", hole=0.4)
+        # FIXED: Use PAYMENT_TEXT
+        fig_pay = px.pie(df, names="PAYMENT_TEXT", title="Payment Method Risks", hole=0.4)
         st.plotly_chart(fig_pay, use_container_width=True)
 
     st.subheader("3. Numerical Distributions")
-    # Histogram of Monthly Charges
     fig_hist = px.histogram(df, x="MONTHLY_CHARGES", nbins=50, title="Distribution of Monthly Charges", opacity=0.7)
     st.plotly_chart(fig_hist, use_container_width=True)
 
-# --- TAB 2: LIVE MONITORING (Real-Time) ---
+# --- TAB 2: LIVE MONITORING ---
 with tab2:
     st.header("Live Operations Center")
     
-    # 1. Global Metrics
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Avg Churn Risk", f"{df['CHURN_PROBABILITY'].mean():.1%}")
     m3.metric("High Risk Users (>70%)", df[df['CHURN_PROBABILITY'] > 0.7].shape[0], delta_color="inverse")
     
-    # Identify Active Users
     rt_col = 'RT_TOTAL_INTERACTIONS' if 'RT_TOTAL_INTERACTIONS' in df.columns else df.columns[0]
     active_users = df[df[rt_col] > 0].copy()
     m4.metric("Active Sessions (Now)", len(active_users), delta_color="normal")
 
-    # 2. REAL-TIME ACTIVE USERS TABLE
     st.markdown("---")
     st.subheader("🔴 Real-Time Active Sessions")
-    st.info("Users currently interacting with the platform (Data streaming from Snowflake).")
     
     if not active_users.empty:
-        # Show relevant columns for active users
-        rt_display_cols = ['CUSTOMERID', 'CHURN_PROBABILITY', 'RT_TOTAL_INTERACTIONS', 'RT_CHECKOUT_ERRORS', 'RT_CANCELLATION_INTENT', 'RT_AVG_SESSION_SECONDS']
+        rt_display_cols = ['CUSTOMERID', 'CHURN_PROBABILITY', 'RT_TOTAL_INTERACTIONS', 'RT_CHECKOUT_ERRORS', 'RT_CANCELLATION_INTENT']
         rt_valid_cols = [c for c in rt_display_cols if c in active_users.columns]
         
         st.dataframe(
@@ -185,9 +193,8 @@ with tab2:
             use_container_width=True
         )
     else:
-        st.warning("No active users detected in the current window. (Run the generator script to simulate traffic!)")
+        st.warning("No active users detected in the current window.")
 
-    # 3. VIP Watchlist
     st.markdown("---")
     st.subheader("💎 VIP Watchlist Alerts")
     
@@ -212,7 +219,6 @@ with tab2:
 with tab3:
     st.header("AI Model Performance")
 
-    # 1. Leaderboard
     if leaderboard:
         st.subheader("🏆 Model Tournament Results")
         lb_df = pd.DataFrame(leaderboard)
@@ -220,7 +226,6 @@ with tab3:
             return ['background-color: #10b981; color: white' if row['Selected'] == '🏆 WINNER' else '' for _ in row]
         st.dataframe(lb_df.style.apply(highlight_winner, axis=1), use_container_width=True, hide_index=True)
     
-    # 2. Feature Importance
     st.subheader("Feature Importance Analysis")
     col_fi, col_risk = st.columns(2)
     
@@ -229,7 +234,7 @@ with tab3:
             estimator = model.named_steps['clf']
             if hasattr(estimator, 'feature_importances_'):
                 feat_imp = pd.DataFrame({'Feature': X.columns, 'Importance': estimator.feature_importances_}).sort_values(by='Importance', ascending=False).head(10)
-                fig_imp = px.bar(feat_imp, x='Importance', y='Feature', orientation='h', title="Top Predictors of Churn")
+                fig_imp = px.bar(feat_imp, x='Importance', y='Feature', orientation='h', title="Top Predictors")
                 st.plotly_chart(fig_imp, use_container_width=True)
             elif hasattr(estimator, 'coef_'):
                  coeffs = estimator.coef_[0]
@@ -237,7 +242,7 @@ with tab3:
                  fig_imp = px.bar(feat_imp, x='Importance', y='Feature', orientation='h', title="Feature Impact (Coefficients)")
                  st.plotly_chart(fig_imp, use_container_width=True)
             else:
-                st.info("Selected model does not support simple feature importance.")
+                st.info("Visuals not available for this model type (Black Box).")
         except:
             st.info("Feature importance data unavailable.")
 
