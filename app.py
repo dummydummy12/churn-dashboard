@@ -86,7 +86,7 @@ def get_snowflake_data():
     conn.close()
     df.columns = [x.upper() for x in df.columns]
     
-    # --- FIX FOR EDA LABELS ---
+    # --- RECREATE TEXT LABELS FOR EDA ---
     if not df.empty:
         # Contract Text
         def get_contract(row):
@@ -95,9 +95,7 @@ def get_snowflake_data():
             return 'One year'
         df['CONTRACT_TEXT'] = df.apply(get_contract, axis=1)
         
-        # Payment Text (Keep full categories for better insight)
-        # Note: If you don't have the original text column, we infer from dummies
-        # Assuming PAYS_VIA_ECHECK is the main dummy we have.
+        # Payment Text
         df['PAYMENT_TEXT'] = df['PAYS_VIA_ECHECK'].apply(lambda x: 'Electronic Check' if x == 1 else 'Auto-Pay / Other')
         
         # Churn Text
@@ -135,7 +133,7 @@ if model is not None and not df.empty:
 # ==========================================
 tab1, tab2, tab3 = st.tabs(["📊 Data Explorer (EDA)", "🚨 Live Monitoring", "🧠 Model Performance"])
 
-# --- TAB 1: EDA (UPDATED VISUALS) ---
+# --- TAB 1: EDA (CORRECTED STACKED BARS) ---
 with tab1:
     st.header("Exploratory Data Analysis")
     st.markdown("Understanding **Who** is leaving and **Why**.")
@@ -149,45 +147,41 @@ with tab1:
     row2_1, row2_2 = st.columns(2)
     
     with row2_1:
-        # VISUAL 1: Payment Method Risk (Normalized Stacked Bar)
-        # This shows percentages, making it obvious Electronic Check is riskier
+        # VISUAL 1: Payment Method (Corrected: Stacked)
+        # Removed barmode='group' -> Now it stacks correctly to show 100% split
         fig_pay = px.histogram(df, x="PAYMENT_TEXT", color="CHURN_TEXT", 
-                               barnorm='percent', barmode="group",
+                               barnorm='percent',
                                title="Churn Rate by Payment Method",
                                color_discrete_map={'Churned': '#ef4444', 'Active': '#10b981'},
                                height=400)
         st.plotly_chart(fig_pay, use_container_width=True)
-        st.info("💡 **Insight:** 'Electronic Check' users (Manual Pay) have a significantly higher Churn Rate compared to Auto-Pay users. This is a friction point.")
+        st.info("💡 **Insight:** Notice the large Red bar for 'Electronic Check'. Manual payers leave faster.")
 
     with row2_2:
-        # VISUAL 2: Contract Type (Normalized Stacked Bar)
+        # VISUAL 2: Contract Type (Corrected: Stacked)
         fig_contract = px.histogram(df, x="CONTRACT_TEXT", color="CHURN_TEXT", 
-                                  barnorm='percent', barmode="group",
+                                  barnorm='percent',
                                   title="Churn Rate by Contract Type", 
                                   color_discrete_map={'Churned': '#ef4444', 'Active': '#10b981'},
                                   height=400)
         st.plotly_chart(fig_contract, use_container_width=True)
-        st.info("💡 **Insight:** Month-to-month contracts are the most volatile. Long-term contracts effectively lock users in.")
+        st.info("💡 **Insight:** Month-to-month contracts are ~40-50% Red (High Churn), while Two-Year contracts are almost entirely Green.")
 
     st.markdown("---")
     st.subheader("2. Financial Impact: Are we losing high-value customers?")
     
-    # VISUAL 3: Monthly Charges vs Churn (Overlay Histogram)
-    # This shows the "Red Spike" on the right side
+    # VISUAL 3: Monthly Charges
     fig_hist = px.histogram(df, x="MONTHLY_CHARGES", color="CHURN_TEXT", 
                             title="Distribution of Monthly Charges (Churn vs. Active)",
                             barmode="overlay", opacity=0.7, nbins=50,
                             color_discrete_map={'Churned': '#ef4444', 'Active': '#3b82f6'})
     st.plotly_chart(fig_hist, use_container_width=True)
     
-    # Insight text explaining the Bimodal distribution
     col_desc1, col_desc2 = st.columns(2)
     with col_desc1:
-        st.caption("📉 **The Left Cluster ($20):** Basic users (Phone only). Low Churn.")
+        st.caption("📉 **Left ($20):** Basic users. Mostly Blue (Active).")
     with col_desc2:
-        st.caption("📈 **The Right Cluster ($70-$100):** Premium users (Fiber + Extras). **High Churn Risk.**")
-        
-    st.warning("⚠️ **Critical Finding:** We are losing High-Value Premium customers at a faster rate than Budget customers.")
+        st.caption("📈 **Right ($70+):** Premium users. Notice the Red spikes indicating higher churn.")
 
 # --- TAB 2: LIVE MONITORING ---
 with tab2:
