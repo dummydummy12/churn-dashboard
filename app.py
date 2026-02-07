@@ -86,19 +86,21 @@ def get_snowflake_data():
     conn.close()
     df.columns = [x.upper() for x in df.columns]
     
-    # --- FIX FOR EDA: Recreate Text Labels from Numbers ---
+    # --- FIX FOR EDA LABELS ---
     if not df.empty:
-        # 1. Recreate 'CONTRACT' text
+        # Contract Text
         def get_contract(row):
             if row.get('IS_MONTH_TO_MONTH') == 1: return 'Month-to-month'
             if row.get('IS_TWO_YEAR') == 1: return 'Two year'
             return 'One year'
         df['CONTRACT_TEXT'] = df.apply(get_contract, axis=1)
         
-        # 2. Recreate 'PAYMENT' text (Simplified)
-        df['PAYMENT_TEXT'] = df['PAYS_VIA_ECHECK'].apply(lambda x: 'Electronic Check' if x == 1 else 'Other')
+        # Payment Text (Keep full categories for better insight)
+        # Note: If you don't have the original text column, we infer from dummies
+        # Assuming PAYS_VIA_ECHECK is the main dummy we have.
+        df['PAYMENT_TEXT'] = df['PAYS_VIA_ECHECK'].apply(lambda x: 'Electronic Check' if x == 1 else 'Auto-Pay / Other')
         
-        # 3. Recreate 'CHURN' text for legends
+        # Churn Text
         df['CHURN_TEXT'] = df['CHURN_LABEL'].apply(lambda x: 'Churned' if x == 1 else 'Active')
 
     return df.fillna(0)
@@ -121,10 +123,7 @@ leaderboard = resources["leaderboard"]
 df = get_snowflake_data()
 
 if model is not None and not df.empty:
-    # Drop non-feature columns for prediction
-    # Note: We must drop the NEW text columns we just created, or the model will crash
     X = df.drop(columns=['CUSTOMERID', 'CHURN_LABEL', 'CONTRACT_TEXT', 'PAYMENT_TEXT', 'CHURN_TEXT'], errors='ignore')
-    
     try:
         df['PREDICTED_CHURN'] = model.predict(X)
         df['CHURN_PROBABILITY'] = model.predict_proba(X)[:, 1]
@@ -136,37 +135,59 @@ if model is not None and not df.empty:
 # ==========================================
 tab1, tab2, tab3 = st.tabs(["📊 Data Explorer (EDA)", "🚨 Live Monitoring", "🧠 Model Performance"])
 
-# --- TAB 1: EDA (FIXED) ---
+# --- TAB 1: EDA (UPDATED VISUALS) ---
 with tab1:
     st.header("Exploratory Data Analysis")
-    st.markdown("Understanding the underlying patterns in our Telco customer base.")
+    st.markdown("Understanding **Who** is leaving and **Why**.")
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Total Rows Fetched", len(df))
     c2.metric("Features Available", len(df.columns))
     c3.metric("Historical Churn Rate", f"{df['CHURN_LABEL'].mean():.1%}")
 
-    st.subheader("1. Sample Data (Customer 360 View)")
-    st.dataframe(df.head(5), use_container_width=True)
-
-    st.subheader("2. Key Distributions")
+    st.subheader("1. Where is the Churn coming from?")
     row2_1, row2_2 = st.columns(2)
     
     with row2_1:
-        # FIXED: Use CONTRACT_TEXT and CHURN_TEXT
-        fig_contract = px.histogram(df, x="CONTRACT_TEXT", color="CHURN_TEXT", barmode="group", 
-                                  title="Churn by Contract Type", color_discrete_sequence=["#ef4444", "#10b981"])
-        st.plotly_chart(fig_contract, use_container_width=True)
-        st.caption("Insight: Month-to-month customers churn significantly more than Two-year contract holders.")
+        # VISUAL 1: Payment Method Risk (Normalized Stacked Bar)
+        # This shows percentages, making it obvious Electronic Check is riskier
+        fig_pay = px.histogram(df, x="PAYMENT_TEXT", color="CHURN_TEXT", 
+                               barnorm='percent', barmode="group",
+                               title="Churn Rate by Payment Method",
+                               color_discrete_map={'Churned': '#ef4444', 'Active': '#10b981'},
+                               height=400)
+        st.plotly_chart(fig_pay, use_container_width=True)
+        st.info("💡 **Insight:** 'Electronic Check' users (Manual Pay) have a significantly higher Churn Rate compared to Auto-Pay users. This is a friction point.")
 
     with row2_2:
-        # FIXED: Use PAYMENT_TEXT
-        fig_pay = px.pie(df, names="PAYMENT_TEXT", title="Payment Method Risks", hole=0.4)
-        st.plotly_chart(fig_pay, use_container_width=True)
+        # VISUAL 2: Contract Type (Normalized Stacked Bar)
+        fig_contract = px.histogram(df, x="CONTRACT_TEXT", color="CHURN_TEXT", 
+                                  barnorm='percent', barmode="group",
+                                  title="Churn Rate by Contract Type", 
+                                  color_discrete_map={'Churned': '#ef4444', 'Active': '#10b981'},
+                                  height=400)
+        st.plotly_chart(fig_contract, use_container_width=True)
+        st.info("💡 **Insight:** Month-to-month contracts are the most volatile. Long-term contracts effectively lock users in.")
 
-    st.subheader("3. Numerical Distributions")
-    fig_hist = px.histogram(df, x="MONTHLY_CHARGES", nbins=50, title="Distribution of Monthly Charges", opacity=0.7)
+    st.markdown("---")
+    st.subheader("2. Financial Impact: Are we losing high-value customers?")
+    
+    # VISUAL 3: Monthly Charges vs Churn (Overlay Histogram)
+    # This shows the "Red Spike" on the right side
+    fig_hist = px.histogram(df, x="MONTHLY_CHARGES", color="CHURN_TEXT", 
+                            title="Distribution of Monthly Charges (Churn vs. Active)",
+                            barmode="overlay", opacity=0.7, nbins=50,
+                            color_discrete_map={'Churned': '#ef4444', 'Active': '#3b82f6'})
     st.plotly_chart(fig_hist, use_container_width=True)
+    
+    # Insight text explaining the Bimodal distribution
+    col_desc1, col_desc2 = st.columns(2)
+    with col_desc1:
+        st.caption("📉 **The Left Cluster ($20):** Basic users (Phone only). Low Churn.")
+    with col_desc2:
+        st.caption("📈 **The Right Cluster ($70-$100):** Premium users (Fiber + Extras). **High Churn Risk.**")
+        
+    st.warning("⚠️ **Critical Finding:** We are losing High-Value Premium customers at a faster rate than Budget customers.")
 
 # --- TAB 2: LIVE MONITORING ---
 with tab2:
