@@ -97,7 +97,7 @@ def get_snowflake_data():
         df['PAYMENT_TEXT'] = df['PAYS_VIA_ECHECK'].apply(lambda x: 'Electronic Check' if x == 1 else 'Auto-Pay / Other')
         df['CHURN_TEXT'] = df['CHURN_LABEL'].apply(lambda x: 'Churned' if x == 1 else 'Active')
 
-        # --- NEW: GENERATE EXPLAINABLE RISK REASONS ---
+        # --- GENERATE EXPLAINABLE RISK REASONS ---
         def get_risk_reason(row):
             reasons = []
             # Real-Time Signals
@@ -145,9 +145,10 @@ if model is not None and not df.empty:
 # ==========================================
 # TABS LAYOUT
 # ==========================================
-tab1, tab2, tab3 = st.tabs(["📊 Data Explorer (EDA)", "🚨 Live Monitoring", "🧠 Model Performance"])
+# NEW ORDER: 1. Data -> 2. Model -> 3. Action
+tab1, tab2, tab3 = st.tabs(["📊 Data Explorer (EDA)", "🧠 Model Performance", "🚨 Live Operations"])
 
-# --- TAB 1: EDA (SIMPLIFIED & CORRECTED) ---
+# --- TAB 1: EDA ---
 with tab1:
     st.header("Exploratory Data Analysis")
     st.markdown("Understanding **Who** is leaving and **Why**.")
@@ -161,10 +162,9 @@ with tab1:
     row2_1, row2_2 = st.columns(2)
     
     with row2_1:
-        # VISUAL 1: Churn Rate by Payment Method (Bar Chart)
-        # Calculate rates manually for perfect accuracy
+        # VISUAL 1: Churn Rate by Payment Method
         pay_churn = df.groupby('PAYMENT_TEXT')['CHURN_LABEL'].mean().reset_index()
-        pay_churn['CHURN_LABEL'] = pay_churn['CHURN_LABEL'] * 100 # Convert to %
+        pay_churn['CHURN_LABEL'] = pay_churn['CHURN_LABEL'] * 100 
         
         fig_pay = px.bar(pay_churn, x="PAYMENT_TEXT", y="CHURN_LABEL", 
                          title="Churn Rate % by Payment Method",
@@ -174,7 +174,7 @@ with tab1:
         st.plotly_chart(fig_pay, use_container_width=True)
 
     with row2_2:
-        # VISUAL 2: Churn Rate by Contract (Bar Chart)
+        # VISUAL 2: Churn Rate by Contract
         cont_churn = df.groupby('CONTRACT_TEXT')['CHURN_LABEL'].mean().reset_index()
         cont_churn['CHURN_LABEL'] = cont_churn['CHURN_LABEL'] * 100
         
@@ -187,83 +187,27 @@ with tab1:
 
     st.markdown("---")
     st.subheader("2. Financial Impact Analysis")
+    # VISUAL 3: Monthly Charges
     fig_hist = px.histogram(df, x="MONTHLY_CHARGES", color="CHURN_TEXT", 
-                            title="Churn by Monthly Bill Amount",
+                            title="Churn by Monthly Bill Amount (Bimodal Distribution)",
                             barmode="overlay", opacity=0.7, nbins=50,
                             color_discrete_map={'Churned': '#ef4444', 'Active': '#3b82f6'})
     st.plotly_chart(fig_hist, use_container_width=True)
+    
+    # RESTORED: Context Labels
+    col_desc1, col_desc2 = st.columns(2)
+    with col_desc1:
+        st.info("📉 **Left Cluster ($20):** **Budget Users**. Likely Phone-only service. They have low churn because the service is cheap.")
+    with col_desc2:
+        st.error("📈 **Right Cluster ($70-$100):** **Premium Users**. Fiber Optic + Streaming bundles. This group has **High Churn** and represents the biggest revenue risk.")
 
-# --- TAB 2: LIVE MONITORING (SMARTER) ---
+# --- TAB 2: MODEL PERFORMANCE ---
 with tab2:
-    st.header("Live Operations Center")
-    
-    # 1. FILTER: ONLY Show Active Customers (Ignore already churned)
-    active_customers_df = df[df['CHURN_LABEL'] == 0].copy()
-    
-    m1, m2, m3, m4 = st.columns(4)
-    # Metric 1: Avg Risk of CURRENT customers
-    m1.metric("Avg Risk (Active Users)", f"{active_customers_df['CHURN_PROBABILITY'].mean():.1%}")
-    # Metric 2: High Risk count
-    high_risk_count = active_customers_df[active_customers_df['CHURN_PROBABILITY'] > 0.7].shape[0]
-    m3.metric("At-Risk Customers", high_risk_count, delta_color="inverse")
-    
-    # Metric 3: Real-Time Active Sessions
-    rt_col = 'RT_TOTAL_INTERACTIONS' if 'RT_TOTAL_INTERACTIONS' in df.columns else df.columns[0]
-    # We look at ALL customers (even if labelled churned, maybe they came back?) for traffic
-    rt_traffic = df[df[rt_col] > 0].copy()
-    m4.metric("Active Sessions (Now)", len(rt_traffic), delta_color="normal")
-
-    # 2. REAL-TIME TABLE (ENHANCED)
-    st.markdown("---")
-    st.subheader("🔴 Real-Time Active Sessions")
-    st.caption("Users currently interacting with the platform. Sorted by activity level.")
-    
-    if not rt_traffic.empty:
-        # Select useful columns + The new "RISK_FACTORS" column
-        rt_display_cols = ['CUSTOMERID', 'CHURN_PROBABILITY', 'RISK_FACTORS', 'RT_TOTAL_INTERACTIONS', 'TENURE_MONTHS', 'MONTHLY_CHARGES']
-        rt_valid_cols = [c for c in rt_display_cols if c in rt_traffic.columns]
-        
-        st.dataframe(
-            rt_traffic[rt_valid_cols].sort_values(by='RT_TOTAL_INTERACTIONS', ascending=False)
-            .style.background_gradient(subset=['CHURN_PROBABILITY'], cmap='Reds')
-            .format({'CHURN_PROBABILITY': "{:.1%}", 'MONTHLY_CHARGES': "${:.2f}"}),
-            use_container_width=True
-        )
-    else:
-        st.warning("No active users detected. Run the generator script to simulate traffic.")
-
-    # 3. VIP WATCHLIST (ENHANCED)
-    st.markdown("---")
-    st.subheader("💎 VIP Watchlist Alerts")
-    st.caption("High-Value Customers (Tenure > 2 Years & Bill > $70) showing signs of leaving.")
-    
-    # Filter from ACTIVE customers only
-    vip_mask = (active_customers_df['TENURE_MONTHS'] > 24) & (active_customers_df['MONTHLY_CHARGES'] > 70)
-    vips = active_customers_df[vip_mask].copy()
-    risky_vips = vips[vips['CHURN_PROBABILITY'] > 0.5]
-    
-    if not risky_vips.empty:
-        st.error(f"🚨 {len(risky_vips)} VIPs need attention!")
-        
-        # Added RISK_FACTORS here too
-        vip_cols = ['CUSTOMERID', 'CHURN_PROBABILITY', 'RISK_FACTORS', 'TENURE_MONTHS', 'MONTHLY_CHARGES', 'RT_CHECKOUT_ERRORS']
-        valid_vip_cols = [c for c in vip_cols if c in risky_vips.columns]
-        
-        st.dataframe(
-            risky_vips[valid_vip_cols].sort_values(by='CHURN_PROBABILITY', ascending=False)
-            .style.background_gradient(subset=['CHURN_PROBABILITY'], cmap='Reds')
-            .format({'CHURN_PROBABILITY': "{:.1%}", 'MONTHLY_CHARGES': "${:.2f}"}),
-            use_container_width=True
-        )
-    else:
-        st.success("No VIPs currently exhibiting churn behavior.")
-
-# --- TAB 3: MODEL PERFORMANCE ---
-with tab3:
     st.header("AI Model Performance")
+    st.markdown("How the **Multi-Model Tournament** picked the winner.")
 
     if leaderboard:
-        st.subheader("🏆 Model Tournament Results")
+        st.subheader("🏆 Tournament Leaderboard")
         lb_df = pd.DataFrame(leaderboard)
         def highlight_winner(row):
             return ['background-color: #10b981; color: white' if row['Selected'] == '🏆 WINNER' else '' for _ in row]
@@ -293,3 +237,73 @@ with tab3:
         fig_scatter = px.scatter(df, x="TENURE_MONTHS", y="CHURN_PROBABILITY", color="PREDICTED_CHURN", 
                                opacity=0.6, title="Does Loyalty Reduce Risk?")
         st.plotly_chart(fig_scatter, use_container_width=True)
+
+# --- TAB 3: LIVE OPERATIONS (ACTIONABLE) ---
+with tab3:
+    st.header("Live Operations Center")
+    
+    # FILTER: ONLY Active Customers
+    active_customers_df = df[df['CHURN_LABEL'] == 0].copy()
+    
+    # 1. KEY METRICS
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Avg Risk (Active Users)", f"{active_customers_df['CHURN_PROBABILITY'].mean():.1%}")
+    
+    # High Risk Count
+    high_risk_df = active_customers_df[active_customers_df['CHURN_PROBABILITY'] > 0.7]
+    m3.metric("High Risk Users (>70%)", len(high_risk_df), delta_color="inverse")
+    
+    # Active Sessions
+    rt_col = 'RT_TOTAL_INTERACTIONS' if 'RT_TOTAL_INTERACTIONS' in df.columns else df.columns[0]
+    rt_traffic = df[df[rt_col] > 0].copy()
+    m4.metric("Active Sessions (Now)", len(rt_traffic), delta_color="normal")
+
+    # 2. DRILL DOWN: HIGH RISK USERS
+    # This allows clicking to see the 25 users mentioned in your query
+    with st.expander(f"⚠️ View Details: {len(high_risk_df)} High Risk Customers (>70%)", expanded=False):
+        st.dataframe(
+            high_risk_df[['CUSTOMERID', 'CHURN_PROBABILITY', 'RISK_FACTORS', 'TENURE_MONTHS', 'MONTHLY_CHARGES']]
+            .sort_values(by='CHURN_PROBABILITY', ascending=False)
+            .style.background_gradient(subset=['CHURN_PROBABILITY'], cmap='Reds'),
+            use_container_width=True
+        )
+
+    # 3. REAL-TIME TABLE
+    st.markdown("---")
+    st.subheader("🔴 Real-Time Active Sessions")
+    st.caption("Users currently interacting with the platform. Sorted by activity level.")
+    
+    if not rt_traffic.empty:
+        rt_display_cols = ['CUSTOMERID', 'CHURN_PROBABILITY', 'RISK_FACTORS', 'RT_TOTAL_INTERACTIONS', 'RT_CANCELLATION_INTENT']
+        rt_valid_cols = [c for c in rt_display_cols if c in rt_traffic.columns]
+        
+        st.dataframe(
+            rt_traffic[rt_valid_cols].sort_values(by='RT_TOTAL_INTERACTIONS', ascending=False)
+            .style.background_gradient(subset=['CHURN_PROBABILITY'], cmap='Reds'),
+            use_container_width=True
+        )
+    else:
+        st.warning("No active users detected. Run the generator script to simulate traffic.")
+
+    # 4. VIP WATCHLIST
+    st.markdown("---")
+    st.subheader("💎 VIP Watchlist Alerts")
+    st.caption("High-Value Customers (Tenure > 2 Years & Bill > $70) showing signs of leaving (Prob > 50%).")
+    
+    # VIP Logic
+    vip_mask = (active_customers_df['TENURE_MONTHS'] > 24) & (active_customers_df['MONTHLY_CHARGES'] > 70)
+    vips = active_customers_df[vip_mask].copy()
+    risky_vips = vips[vips['CHURN_PROBABILITY'] > 0.5]
+    
+    if not risky_vips.empty:
+        st.error(f"🚨 {len(risky_vips)} VIPs need attention!")
+        vip_cols = ['CUSTOMERID', 'CHURN_PROBABILITY', 'RISK_FACTORS', 'TENURE_MONTHS', 'MONTHLY_CHARGES']
+        valid_vip_cols = [c for c in vip_cols if c in risky_vips.columns]
+        
+        st.dataframe(
+            risky_vips[valid_vip_cols].sort_values(by='CHURN_PROBABILITY', ascending=False)
+            .style.background_gradient(subset=['CHURN_PROBABILITY'], cmap='Reds'),
+            use_container_width=True
+        )
+    else:
+        st.success("No VIPs currently exhibiting churn behavior.")
