@@ -264,7 +264,8 @@ with tab3:
         st.dataframe(
             high_risk_df[['CUSTOMERID', 'CHURN_PROBABILITY', 'RISK_FACTORS', 'TENURE_MONTHS', 'MONTHLY_CHARGES']]
             .sort_values(by='CHURN_PROBABILITY', ascending=False)
-            .style.background_gradient(subset=['CHURN_PROBABILITY'], cmap='Reds'),
+            .style.background_gradient(subset=['CHURN_PROBABILITY'], cmap='Reds')
+            .format({'CHURN_PROBABILITY': "{:.1%}", 'MONTHLY_CHARGES': "${:.2f}"}),
             use_container_width=True
         )
 
@@ -274,12 +275,13 @@ with tab3:
     st.caption("Users currently interacting with the platform. Sorted by activity level.")
     
     if not rt_traffic.empty:
-        rt_display_cols = ['CUSTOMERID', 'CHURN_PROBABILITY', 'RISK_FACTORS', 'RT_TOTAL_INTERACTIONS', 'RT_CANCELLATION_INTENT']
+        rt_display_cols = ['CUSTOMERID', 'CHURN_PROBABILITY', 'RISK_FACTORS', 'RT_TOTAL_INTERACTIONS', 'RT_CANCELLATION_INTENT', 'TENURE_MONTHS', 'MONTHLY_CHARGES']
         rt_valid_cols = [c for c in rt_display_cols if c in rt_traffic.columns]
         
         st.dataframe(
             rt_traffic[rt_valid_cols].sort_values(by='RT_TOTAL_INTERACTIONS', ascending=False)
-            .style.background_gradient(subset=['CHURN_PROBABILITY'], cmap='Reds'),
+            .style.background_gradient(subset=['CHURN_PROBABILITY'], cmap='Reds')
+            .format({'CHURN_PROBABILITY': "{:.1%}", 'MONTHLY_CHARGES': "${:.2f}"}),
             use_container_width=True
         )
     else:
@@ -302,7 +304,8 @@ with tab3:
         
         st.dataframe(
             risky_vips[valid_vip_cols].sort_values(by='CHURN_PROBABILITY', ascending=False)
-            .style.background_gradient(subset=['CHURN_PROBABILITY'], cmap='Reds'),
+            .style.background_gradient(subset=['CHURN_PROBABILITY'], cmap='Reds')
+            .format({'CHURN_PROBABILITY': "{:.1%}", 'MONTHLY_CHARGES': "${:.2f}"}),
             use_container_width=True
         )
     else:
