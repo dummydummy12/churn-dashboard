@@ -145,7 +145,7 @@ if model is not None and not df.empty:
 # ==========================================
 # TABS LAYOUT
 # ==========================================
-# NEW ORDER: 1. Data -> 2. Model -> 3. Action
+# ORDER: 1. Data (EDA) -> 2. Model (Performance) -> 3. Action (Live)
 tab1, tab2, tab3 = st.tabs(["📊 Data Explorer (EDA)", "🧠 Model Performance", "🚨 Live Operations"])
 
 # --- TAB 1: EDA ---
@@ -153,12 +153,22 @@ with tab1:
     st.header("Exploratory Data Analysis")
     st.markdown("Understanding **Who** is leaving and **Why**.")
 
+    # METRICS ROW
     c1, c2, c3 = st.columns(3)
-    c1.metric("Total Rows Fetched", len(df))
+    c1.metric("Rows Fetched (Sampled)", len(df), 
+              help="We sample the top 2000 most active users to ensure dashboard performance.")
     c2.metric("Features Available", len(df.columns))
     c3.metric("Historical Churn Rate", f"{df['CHURN_LABEL'].mean():.1%}")
 
-    st.subheader("1. What drives Churn?")
+    # Data Sampling Explanation
+    st.info("ℹ️ **Data Strategy:** This dashboard fetches a **Smart Sample (Limit 2000)** from Snowflake, sorted by `RT_TOTAL_INTERACTIONS`. This ensures we always analyze the most active users while maintaining sub-second latency.")
+
+    # --- NEW: SAMPLE DATA SECTION ---
+    st.subheader("1. Sample Data (Customer 360 View)")
+    st.markdown("A glimpse into the raw feature set merging **Static Profiles** (Tenure, Charges) with **Live Events**.")
+    st.dataframe(df.head(5), use_container_width=True)
+
+    st.subheader("2. What drives Churn?")
     row2_1, row2_2 = st.columns(2)
     
     with row2_1:
@@ -186,7 +196,7 @@ with tab1:
         st.plotly_chart(fig_contract, use_container_width=True)
 
     st.markdown("---")
-    st.subheader("2. Financial Impact Analysis")
+    st.subheader("3. Financial Impact Analysis")
     # VISUAL 3: Monthly Charges
     fig_hist = px.histogram(df, x="MONTHLY_CHARGES", color="CHURN_TEXT", 
                             title="Churn by Monthly Bill Amount (Bimodal Distribution)",
@@ -194,7 +204,6 @@ with tab1:
                             color_discrete_map={'Churned': '#ef4444', 'Active': '#3b82f6'})
     st.plotly_chart(fig_hist, use_container_width=True)
     
-    # RESTORED: Context Labels
     col_desc1, col_desc2 = st.columns(2)
     with col_desc1:
         st.info("📉 **Left Cluster ($20):** **Budget Users**. Likely Phone-only service. They have low churn because the service is cheap.")
@@ -238,7 +247,7 @@ with tab2:
                                opacity=0.6, title="Does Loyalty Reduce Risk?")
         st.plotly_chart(fig_scatter, use_container_width=True)
 
-# --- TAB 3: LIVE OPERATIONS (ACTIONABLE) ---
+# --- TAB 3: LIVE OPERATIONS ---
 with tab3:
     st.header("Live Operations Center")
     
@@ -259,7 +268,6 @@ with tab3:
     m4.metric("Active Sessions (Now)", len(rt_traffic), delta_color="normal")
 
     # 2. DRILL DOWN: HIGH RISK USERS
-    # This allows clicking to see the 25 users mentioned in your query
     with st.expander(f"⚠️ View Details: {len(high_risk_df)} High Risk Customers (>70%)", expanded=False):
         st.dataframe(
             high_risk_df[['CUSTOMERID', 'CHURN_PROBABILITY', 'RISK_FACTORS', 'TENURE_MONTHS', 'MONTHLY_CHARGES']]
