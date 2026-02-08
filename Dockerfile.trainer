@@ -1,0 +1,11 @@
+# Use AWS Lambda Python 3.9 Base Image
+FROM public.ecr.aws/lambda/python:3.9
+
+# Install dependencies
+RUN pip install pandas scikit-learn snowflake-connector-python boto3 joblib
+
+# Copy function code (Ensure the python filename matches the COPY source)
+COPY train_and_compare_models.py ${LAMBDA_TASK_ROOT}
+
+# Set the CMD to your handler
+CMD [ "train_and_compare_models.lambda_handler" ]
